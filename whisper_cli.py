@@ -89,7 +89,8 @@ def load_model(args):
     except Exception as e:
         if device != "cuda" or args.device == "cuda":
             raise
-        print(f"[warn] CUDA init failed ({e}); falling back to CPU", file=sys.stderr)        device, compute_type = "cpu", "int8"
+        print(f"[warn] CUDA init failed ({e}); falling back to CPU", file=sys.stderr)
+        device, compute_type = "cpu", "int8"
         model = WhisperModel(model_dir, device=device, compute_type=compute_type, cpu_threads=args.threads)
 
     print(f"[info] device={device} compute_type={compute_type}", file=sys.stderr)

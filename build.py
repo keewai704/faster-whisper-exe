@@ -48,7 +48,7 @@ cmd = [
     *[
         f"--include-data-files={os.path.join(args.model_dir, f)}=model/{f}"
         for f in sorted(os.listdir(args.model_dir))
-        if os.path.isfile(os.path.join(args.model_dir, f)) and f != "README.md"
+        if os.path.isfile(os.path.join(args.model_dir, f)) and not f.startswith(".") and f != "README.md"
     ],
     *[f"--include-data-files={os.path.join(cublas_bin, d)}=cuda/{d}" for d in dlls],
     "--nofollow-import-to=torch,transformers,tkinter,matplotlib,PIL,scipy,pandas,IPython,pytest,setuptools,hf_xet",
