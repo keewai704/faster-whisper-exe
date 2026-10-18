@@ -1,0 +1,90 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  MODEL_ID: openai/whisper-large-v3
+  QUANTIZATION: int8_float16
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore converted model
+        id: model-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: model
+          key: model-${{ env.MODEL_ID }}-${{ env.QUANTIZATION }}-${{ hashFiles('convert_model.py', 'requirements-convert.txt') }}
+
+      - name: Convert model (large-v3 -> CTranslate2 int8)
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          python -m venv C:\convert-venv
+          C:\convert-venv\Scripts\python -m pip install -q --upgrade pip
+          C:\convert-venv\Scripts\pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          C:\convert-venv\Scripts\pip install -q -r requirements-convert.txt
+          C:\convert-venv\Scripts\python convert_model.py --model $env:MODEL_ID --output_dir model --quantization $env:QUANTIZATION
+
+      # saved right away so a later failing step does not throw the conversion away
+      - name: Save converted model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: model
+          key: ${{ steps.model-cache.outputs.cache-primary-key }}
+
+      - name: Install build dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build exe
+        shell: pwsh
+        run: |
+          $id = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "${{ github.sha }}".Substring(0, 12) }
+          python build.py --model_dir model --output_dir dist --build_id $id --compiler=--msvc=latest
+          Get-Item dist\faster-whisper.exe | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+
+      - name: Smoke test (CPU)
+        shell: pwsh
+        run: |
+          curl.exe -sL -o jfk.flac https://github.com/SYSTRAN/faster-whisper/raw/master/tests/data/jfk.flac
+          dist\faster-whisper.exe --info
+          dist\faster-whisper.exe jfk.flac --device cpu -f txt -o out
+          $text = Get-Content out\jfk.txt -Raw
+          if ($text -notmatch "your country") { throw "unexpected transcription: $text" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: faster-whisper-large-v3-win64-cuda
+          path: dist/faster-whisper.exe
+          compression-level: 0
+          retention-days: 90
+
+      - name: Release (tags only, when under the 2 GiB asset limit)
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $size = (Get-Item dist\faster-whisper.exe).Length
+          if ($size -lt 2147483648) {
+            gh release create $env:GITHUB_REF_NAME dist\faster-whisper.exe --title $env:GITHUB_REF_NAME --generate-notes
+          } else {
+            gh release create $env:GITHUB_REF_NAME --title $env:GITHUB_REF_NAME --notes "exe is $([math]::Round($size/1MB)) MB (over the 2 GiB release limit). Download it from the workflow run artifacts: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          }
