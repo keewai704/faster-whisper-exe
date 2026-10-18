@@ -79,15 +79,17 @@ def load_model(args):
 
     compute_type = args.compute_type
     if compute_type == "auto":
-        compute_type = "int8_float16" if device == "cuda" else "int8"
+        # The int8 weights are expanded to float16 on load: on Blackwell (RTX 50)
+        # fp16 GEMMs beat int8_float16 (~20% faster on an RTX 5070 Ti). bfloat16
+        # is faster still but drops segments, so it is opt-in only.
+        compute_type = "float16" if device == "cuda" else "int8"
 
     try:
         model = WhisperModel(model_dir, device=device, compute_type=compute_type, cpu_threads=args.threads)
     except Exception as e:
         if device != "cuda" or args.device == "cuda":
             raise
-        print(f"[warn] CUDA init failed ({e}); falling back to CPU", file=sys.stderr)
-        device, compute_type = "cpu", "int8"
+        print(f"[warn] CUDA init failed ({e}); falling back to CPU", file=sys.stderr)        device, compute_type = "cpu", "int8"
         model = WhisperModel(model_dir, device=device, compute_type=compute_type, cpu_threads=args.threads)
 
     print(f"[info] device={device} compute_type={compute_type}", file=sys.stderr)
@@ -105,7 +107,11 @@ def main():
     p.add_argument("-f", "--output_format", choices=["txt", "srt", "vtt", "json", "all", "none"], default="srt")
     p.add_argument("-o", "--output_dir", default=None, help="output directory (default: next to input)")
     p.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
-    p.add_argument("--compute_type", default="auto", help="int8_float16, int8, float16, float32 ... (default: auto)")
+    p.add_argument(
+        "--compute_type",
+        default="auto",
+        help="float16, int8_float16, bfloat16, int8, float32 ... (default: float16 on CUDA, int8 on CPU)",
+    )
     p.add_argument("--beam_size", type=int, default=5)
     p.add_argument("--vad_filter", action="store_true", help="skip silence with Silero VAD")
     p.add_argument("--initial_prompt", default=None)

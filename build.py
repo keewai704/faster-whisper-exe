@@ -4,7 +4,8 @@ Bundles: the CTranslate2 Whisper model in --model_dir, and the two cuBLAS DLLs
 that ctranslate2 actually loads on CUDA (cuDNN / nvrtc are never loaded for
 Whisper, so they are left out to keep the binary small).
 
-The onefile payload is zstd-compressed and unpacked once into a per-build
+The onefile payload is zstd-compressed (Nuitka uses level 22, the maximum,
+unless --low-memory is given) and unpacked once into a per-build
 cache directory, so later runs start without re-extracting ~2 GB.
 """
 
@@ -20,6 +21,11 @@ p.add_argument("--output_dir", default="dist")
 p.add_argument("--build_id", default="dev", help="cache folder name; change it per release")
 p.add_argument("--compiler", default=None, help="e.g. --zig or --msvc=latest")
 args = p.parse_args()
+
+try:
+    import zstandard  # noqa: F401  Nuitka silently skips onefile compression without it
+except ImportError:
+    sys.exit("zstandard is required for the compressed onefile payload: pip install zstandard")
 
 if not os.path.isfile(os.path.join(args.model_dir, "model.bin")):
     sys.exit(f"model not found in {args.model_dir}")
@@ -38,7 +44,12 @@ cmd = [
     "--output-filename=faster-whisper.exe",
     f"--onefile-tempdir-spec={{CACHE_DIR}}/faster-whisper-exe/{args.build_id}",
     "--include-package-data=faster_whisper",
-    f"--include-data-dir={args.model_dir}=model",
+    # listed one by one: --include-data-dir silently drops *.bin files
+    *[
+        f"--include-data-files={os.path.join(args.model_dir, f)}=model/{f}"
+        for f in sorted(os.listdir(args.model_dir))
+        if os.path.isfile(os.path.join(args.model_dir, f)) and f != "README.md"
+    ],
     *[f"--include-data-files={os.path.join(cublas_bin, d)}=cuda/{d}" for d in dlls],
     "--nofollow-import-to=torch,transformers,tkinter,matplotlib,PIL,scipy,pandas,IPython,pytest,setuptools,hf_xet",
     "whisper_cli.py",
