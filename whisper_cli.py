@@ -114,7 +114,21 @@ def main():
         help="float16, int8_float16, bfloat16, int8, float32 ... (default: float16 on CUDA, int8 on CPU)",
     )
     p.add_argument("--beam_size", type=int, default=5)
-    p.add_argument("--vad_filter", action="store_true", help="skip silence with Silero VAD")
+    # Defaults measured on a 24 min Japanese lecture: VAD + no context carry-over
+    # removed Whisper's repeated sentences and the hallucinated outro, and was the
+    # fastest and closest to MAI-Transcribe 2 of the settings tried.
+    p.add_argument(
+        "--vad_filter",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="skip silence with Silero VAD (default: on; --no-vad_filter to disable)",
+    )
+    p.add_argument(
+        "--condition_on_previous_text",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="feed the previous text as context (default: off, which avoids repetition loops)",
+    )
     p.add_argument("--initial_prompt", default=None)
     p.add_argument("--word_timestamps", action="store_true")
     p.add_argument("--threads", type=int, default=0, help="CPU threads (0 = default)")
@@ -147,6 +161,7 @@ def main():
             task=args.task,
             beam_size=args.beam_size,
             vad_filter=args.vad_filter,
+            condition_on_previous_text=args.condition_on_previous_text,
             initial_prompt=args.initial_prompt,
             word_timestamps=args.word_timestamps,
         )

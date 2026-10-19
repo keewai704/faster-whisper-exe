@@ -7,7 +7,7 @@ NVIDIA GPU があれば CUDA で、なければ CPU で動きます。
 
 ```
 faster-whisper.exe input.mp4 -l ja -f srt
-faster-whisper.exe a.wav b.mp3 -f all -o out --vad_filter
+faster-whisper.exe a.wav b.mp3 -f all -o out
 faster-whisper.exe --info
 ```
 
@@ -19,7 +19,8 @@ faster-whisper.exe --info
 | `-o, --output_dir` | 出力先 (既定は入力ファイルと同じ場所) |
 | `--device` | `auto` `cuda` `cpu` |
 | `--compute_type` | 既定は CUDA で `float16`、CPU で `int8` |
-| `--vad_filter` | 無音区間をスキップ |
+| `--no-vad_filter` | 無音区間のスキップ (VAD) を止める。既定はオン |
+| `--condition_on_previous_text` | 直前の文を文脈として渡す。既定はオフ (同じ文を繰り返す不具合を防ぐため) |
 | `--word_timestamps` | 単語単位のタイムスタンプ |
 
 初回起動時に中身を `%LOCALAPPDATA%\faster-whisper-exe\<ビルドID>` へ展開します。2 回目以降は展開済みのものを使うので、すぐ起動します。
@@ -41,6 +42,26 @@ RTX 5070 Ti で large-v3 に 132 秒の音声を与え、beam 5 で測った結�
 | `int8_float16` | 4.80 s | Blackwell では int8 GEMM のほうが遅い |
 | `bfloat16` | 2.91 s | 速いが、一部の区間が丸ごと欠落した |
 | `int8_bfloat16` | 3.46 s | 同上 |
+
+## MAI-Transcribe 2 との比較
+
+24 分 13 秒の日本語の講義録音 (Notability の録音) で、`bench/compare_openrouter.py` を使って比較しました。
+OpenRouter には `provider.zdr = true` と `data_collection = "deny"` を付けて送っています。データを保持しないエンドポイントが使えない場合は、送信せずにエラーで止まります。
+
+| | 処理時間 | MAI との差 (CER) | 同じ文の繰り返し |
+|---|---|---|---|
+| faster-whisper.exe (RTX 5070 Ti、旧既定: VAD なし・文脈あり) | 80 s | 18.9 % | 5 回 + 存在しない締めの一文 |
+| faster-whisper.exe (新既定: VAD あり・文脈なし) | 59 s | 16.4 % | なし |
+| `microsoft/mai-transcribe-2` (OpenRouter) | 18 s | — | なし (費用 $0.04) |
+
+正解の文字起こしがないので、CER は MAI との食い違いを表します。MAI は「えー」「まあ」などのつなぎ言葉も残すため、その分だけ数字が大きくなります。
+固有名詞や専門用語 (那覇空港、全日空機、捜索救難など) は MAI のほうが正確でした。
+hotwords で専門用語を指定すると、Whisper は繰り返しに陥りました (CER 58 %) ので使っていません。
+
+```
+python bench/extract_pdf_audio.py note.pdf -o audio      # PDF に埋め込まれた音声を取り出す
+python bench/compare_openrouter.py audio.m4a --exe faster-whisper.exe -l ja --report report.json
+```
 
 ## ビルド
 
